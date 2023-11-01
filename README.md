@@ -20,7 +20,7 @@ Server is hosted on Render with the URL: `https://lang-server.onrender.com`
 
     ```json
     {
-        "token": "token"
+        "token": "XXX"
     }
     ```
 
