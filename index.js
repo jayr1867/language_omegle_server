@@ -4,9 +4,27 @@ const cors = require("cors");
 const port = 5000;
 const { findOrCreateRoom, getAccessToken } = require("./util/twilioFunc");
 
+
+const { WebSocketServer } = require("ws");
+const wss = new WebSocketServer({ server: app.listen(port, () => {
+    console.log(`Express server running on port ${port}`);
+  })
+});
+
 // use the Express JSON middleware
 app.use(cors());
 app.use(express.json());
+
+
+wss.on('connection', function connection(ws, req) {
+  ws.on('message', function message(data) {
+    console.log('received: %s', data);
+    ws.send('sending back: ' + data);
+  });
+
+  console.log(wss.clients.size);
+  ws.send('something');
+});
 
 app.post("/join-room", async (req, res) => {
   // return 400 if the request has an empty body or no roomName
@@ -21,9 +39,4 @@ app.post("/join-room", async (req, res) => {
   res.send({
     token: token,
   });
-});
-
-// Start the Express server
-app.listen(port, () => {
-  console.log(`Express server running on port ${port}`);
 });
