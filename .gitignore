@@ -1,3 +1,9 @@
 /node_modules
 
 .env
+
+testing.js
+scrap.js
+
+/.config
+.DS_Store

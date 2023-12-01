@@ -10,13 +10,22 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google-cloud/speech": "^6.1.0",
+    "@google-cloud/translate": "^8.0.2",
+    "chalk": "^5.3.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
+    "esm": "^3.2.25",
     "express": "^4.18.2",
+    "ffmpeg": "^0.0.4",
+    "node-record-lpcm16": "^1.0.1",
     "nodemon": "^3.0.1",
+    "pcm-util": "^3.0.0",
     "prettier": "^3.0.3",
+    "stream": "^0.0.2",
     "twilio": "^4.19.0",
     "uuid": "^9.0.1",
+    "wav": "^1.0.2",
     "ws": "^8.14.2"
   }
 }
