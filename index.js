@@ -1,50 +1,256 @@
+require("dotenv").config();
 const express = require("express");
 const app = express();
 const cors = require("cors");
+const { Server } = require("socket.io");
+const speech = require('@google-cloud/speech');
+const { Translate } = require('@google-cloud/translate').v2;
+
+const translate = new Translate();
+
 const port = 5000;
+
 const { findOrCreateRoom, getAccessToken } = require("./util/twilioFunc");
 const stt = require("./util/STT");
-
-let audBuf = new Uint8Array();
-
-const fs = require('fs');
-
-const { WebSocketServer } = require("ws");
-// const { TIMEOUT } = require("dns"); 
-const wss = new WebSocketServer({ server: app.listen(port, () => {
-    console.log(`Express server running on port ${port}`);
-  })
-});
+const { tranlateText } = require("./util/translate");
 
 // use the Express JSON middleware
 app.use(cors());
 app.use(express.json());
 
+const server = require('http').createServer(app);
+const sockio = require('socket.io');
 
-
-wss.on('connection', function connection(ws, req) {
-  console.log('connected');
-  // let i = 0;
-  ws.on('message', async function message(data) {
-    // console.log(JSON.parse(data)) 
-    // console.log((data.toString('utf-8')));
-    const blob = new Blob([data], { type: 'audio/wav' });
-    // await stt.getAudioData(blob.stream().pipeTo(stt.recognizeStream));
-    console.log(blob.stream())
-  });
-
-  // stt.recording();
- 
-  // console.log(wss.clients.size);
-  // ws.send(stt.recording());
-
-  ws.on('close', () => {
-    // stt.stopRecording();
-    console.log('disconnected');
-  });
+server.listen(port, () => {
+  console.log("listening on port: " + port);
 });
 
+const io = sockio(server, {
+  cors: {
+    // origin: 'http://localhost:5173',
+    methods: ["GET", "POST"],
+  }
+}); 
+
+
+
+
+// const io = new Server( app.listen(port, () => {
+//   console.log("listening on port: " + port);
+// }),{
+//   cors: {
+//     origin: 'http://127.0.0.1:5173',
+//     methods: ["GET", "POST"],
+//   }
+// });
+
+
+const speechClient = new speech.SpeechClient();
+
+const rooms = {};
+
+io.on('connection', (socket) => {
+  let recognizeStream = null;
+  console.log('connected: ' + socket.id);
+
+  socket.on('query', (data) => {
+    socket.join(data.roomName);
+    const roomName = data.roomName;
+
+    if (!rooms[roomName]) {
+      rooms[roomName] = [];
+    }
+
+    rooms[roomName].push({ STT: data.sttLang, fromLang: data.transLang, toLang:'', socketId: socket.id });
+
+    // if (rooms[roomName].length === 2) {
+    // socket.emit("counter", rooms[roomName].length);
+    // }
+
+    console.log(rooms);
+
+    // delete (rooms[roomName]);
+
+    // console.log(rooms);
+
+    const cli = io.sockets.adapter.rooms.get(data.roomName);
+
+    // console.log(cli.size);
+
+
+    // socket.emit('query', data);
+  });
+
+  //send message to client
+  
+  socket.on('disconnect', () => {
+    console.log("disconnected: " + socket.id);
+  });
+  
+  socket.on("send_message", (message) => {
+    console.log("message: " + message);
+    setTimeout(() => {
+      io.emit("receive_message", "got this message" + message);
+    }, 1000);
+  });
+
+  socket.on("startGoogleCloudStream", function (data) {
+    // console.log(data);
+    startRecognitionStream(this, data);
+
+  });
+
+  socket.on("endGoogleCloudStream", function (data) {
+    console.log("** ending google cloud stream **\n");
+    stopRecognitionStream();
+
+    if (rooms[data.roomName]) {
+      rooms[data.roomName] = rooms[data.roomName].filter((client) => {
+        if (client.socketId === socket.id) {
+          return false; // Remove the disconnected client
+        }
+        return true;
+      });
+    }
+    // if (!rooms[data.roomName]) {
+    //   console.log("Room is empty");
+    // }
+    // console.log(rooms)
+  });
+
+  socket.on("send_audio_data", async (audioData) => {
+    io.emit("receive_message", "Got audio data");
+    if (recognizeStream !== null) {
+      try {
+        recognizeStream.write(audioData.audio);
+      } catch (err) {
+        console.log("Error calling google api " + err);
+      }
+    } else {
+      console.log("RecognizeStream is null");
+    }
+  });
+
+  async function startRecognitionStream(client, data) {
+    console.log("* StartRecognitionStream\n");
+    roomName = data.roomName;
+    sttLang = data.sttLang;
+    fromLang = data.transLang;
+
+    let toLang;
+
+
+
+    const request = {
+      config: {
+        encoding: encoding,
+        sampleRateHertz: sampleRateHertz,
+        languageCode: sttLang,
+      },
+      interimResults: true,
+    };
+
+    console.log(request);
+
+    // for (const client of rooms[roomName]) {
+    //   if (client.socketId !== socket.id) {
+    //     toLang = client.fromLang;
+    //     break;
+    //   }
+    // }
+
+    // if (!toLang) {
+    //   return;
+    // }
+
+    if (rooms[roomName].length === 2) {
+      // console.log(toLang);
+      // console.log(rooms[roomName]);
+      rooms[roomName][0].toLang = rooms[roomName][1].fromLang;
+      rooms[roomName][1].toLang = rooms[roomName][0].fromLang;
+      
+    }
+
+    console.log(rooms);
+
+
+
+    try {
+      // console.log('inside!');
+      recognizeStream = speechClient
+        .streamingRecognize(request)
+        .on("error", console.error)
+        .on("data", async (data) => {
+          const result = data.results[0];
+          const isFinal = result.isFinal;
+
+          const transcription = data.results
+            .map((result) => result.alternatives[0].transcript)
+            .join("\n");
+
+          console.log(`Transcription: `, transcription);
+
+          let clientid;
+
+          if (rooms[roomName].length === 2) {
+            for (const client of rooms[roomName]) {
+              if (client.socketId === socket.id) {
+                fromLang = client.fromLang;
+                toLang = client.toLang;
+                // break;
+              } else {
+                clientid = client.socketId;
+              }
+            }
+            const options = {
+              from: fromLang,
+              to: toLang,
+            };
+            
+            console.log(options)
+
+            const trans = await translate.translate(transcription, options);
+
+            io.to(clientid).emit("receive_audio_text", {
+            
+            // client.emit("receive_audio_text", {
+              text: trans[0],
+              // text: transcription,
+              final: isFinal,
+            });
+          } else {
+
+
+          // console.log(transcription);
+
+          // console.log(trans[1].data.fromLangs[0].tranlateText )
+
+          // client.emit("receive_audio_text", {
+          //   // text: trans[0],
+          //   text: transcription,
+          //   final: isFinal,
+          // });
+        }
+        });
+    } catch (err) {
+      console.error("Error streaming google api " + err);
+    }
+  }
+
+  function stopRecognitionStream() {
+    if (recognizeStream) {
+      console.log("* StopRecognitionStream \n");
+      recognizeStream.end();
+    }
+    recognizeStream = null;
+  }
+});
+
+
+
+
 app.post("/join-room", async (req, res) => {
+  console.log("join-room")
   // return 400 if the request has an empty body or no roomName
   if (!req.body || !req.body.roomName) {
     return res.status(400).send("Must include roomName argument.");
@@ -61,50 +267,8 @@ app.post("/join-room", async (req, res) => {
 
 
 
+const encoding = "LINEAR16";
+const sampleRateHertz = 16000;
+// const languageCode = "en-US"; //en-US
+const alternativeLanguageCodes = ["en-US", "ko-KR"];
 
-
-const wav = require('wav');
-
-function saveAudioBufferToWav(audioBuffer, outputPath, sampleRate) {
-  const writer = new wav.FileWriter(outputPath, {
-    channels: 1,            // 1 for mono, 2 for stereo
-    sampleRate: sampleRate, // e.g., 44100 Hz
-    bitDepth: 16,           // 16-bit PCM audio
-  });
-
-  // Convert Uint16Array to Buffer
-  const buffer = Buffer.from(audioBuffer.buffer);
-
-  // Write the audio buffer data to the WAV file
-  writer.write(buffer);
-
-  // Close the WAV file writer
-  writer.end();
-
-  console.log(`Audio saved to ${outputPath}`);
-}
-// Example usage
-
-
-
-
-
-function concatenateBuffers(buffer1, buffer2) {
-  const result = new Uint8Array(buffer1.length + buffer2.length);
-  result.set(buffer1, 0);
-  result.set(buffer2, buffer1.length);
-  return result;
-}
-
-
-function convertAudioToLinear16(uint8ArrayBuffer) {
-  const int8ArrayBuffer = new Int8Array(uint8ArrayBuffer);
-  const int16ArrayBuffer = new Int16Array(int8ArrayBuffer.length);
-
-  for (let i = 0; i < int8ArrayBuffer.length; i++) {
-    int16ArrayBuffer[i] = int8ArrayBuffer[i] * 256;
-    // console.log(int16ArrayBuffer[i]);
-  }
-
-  return int16ArrayBuffer;
-}
