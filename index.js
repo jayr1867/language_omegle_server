@@ -59,12 +59,12 @@ io.on('connection', (socket) => {
     console.log("disconnected: " + socket.id);
   });
   
-  socket.on("send_message", (message) => {
-    console.log("message: " + message);
-    setTimeout(() => {
-      io.emit("receive_message", "got this message" + message);
-    }, 1000);
-  });
+  // socket.on("send_message", (message) => {
+  //   // console.log("message: " + message);
+  //   setTimeout(() => {
+  //     io.emit("receive_message", "got this message" + message);
+  //   }, 1000);
+  // });
 
   socket.on("startGoogleCloudStream", function (data) {
     // console.log(data);
@@ -73,7 +73,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on("endGoogleCloudStream", function (data) {
-    console.log("** ending google cloud stream **\n");
+    // console.log("** ending google cloud stream **\n");
     stopRecognitionStream();
 
     if (rooms[data]) {
@@ -100,12 +100,12 @@ io.on('connection', (socket) => {
       }
     } else {
       socket.emit("receive_message", "RecognizeStream is null");
-      console.log("RecognizeStream is null");
+      // console.log("RecognizeStream is null");
     }
   });
 
   async function startRecognitionStream(client, data) {
-    console.log("* StartRecognitionStream\n");
+    // console.log("* StartRecognitionStream\n");
     roomName = data.roomName;
     sttLang = data.sttLang;
     fromLang = data.transLang;
@@ -143,7 +143,7 @@ io.on('connection', (socket) => {
             .map((result) => result.alternatives[0].transcript)
             .join("\n");
 
-          console.log(`Transcription: `, transcription);
+          // console.log(`Transcription: `, transcription);
 
           let clientid;
           if (rooms[roomName]) {
@@ -157,22 +157,31 @@ io.on('connection', (socket) => {
                   clientid = client.socketId;
                 }
               }
-              const options = {
-                from: fromLang,
-                to: toLang,
-              };
-              
-              console.log(options)
 
-              const trans = await translate.translate(transcription, options);
+              if (toLang === fromLang) {
+                client.emit("receive_audio_text", {
+                  text: transcription,
+                  final: isFinal,
+                });
+              } else {
 
-              io.to(clientid).emit("receive_audio_text", {
-              
-              // client.emit("receive_audio_text", {
-                text: trans[0],
-                // text: transcription,
-                final: isFinal,
-              });
+                const options = {
+                  from: fromLang,
+                  to: toLang,
+                };
+                
+                // console.log(options)
+
+                const trans = await translate.translate(transcription, options);
+
+                io.to(clientid).emit("receive_audio_text", {
+                
+                // client.emit("receive_audio_text", {
+                  text: trans[0],
+                  // text: transcription,
+                  final: isFinal,
+                });
+              }
             }
           }
         });
@@ -183,7 +192,7 @@ io.on('connection', (socket) => {
 
   function stopRecognitionStream() {
     if (recognizeStream) {
-      console.log("* StopRecognitionStream \n");
+      // console.log("* StopRecognitionStream \n");
       recognizeStream.end();
     }
     recognizeStream = null;
@@ -192,7 +201,7 @@ io.on('connection', (socket) => {
 
 
 app.post("/join-room", async (req, res) => {
-  console.log("join-room")
+  // console.log("join-room")
   // return 400 if the request has an empty body or no roomName
   if (!req.body || !req.body.roomName) {
     return res.status(400).send("Must include roomName argument.");
